@@ -1,0 +1,68 @@
+package com.thrive.services.impl;
+
+import com.google.inject.Singleton;
+import com.thrive.client.cache.user.UserCache;
+import com.thrive.core.ErrorCode;
+import com.thrive.core.UserException;
+import com.thrive.db.UsersDB;
+import com.thrive.model.dao.StoredUser;
+import com.thrive.model.dto.User;
+import com.thrive.model.request.UserCreateRequest;
+import com.thrive.services.UserService;
+import com.thrive.util.UserUtils;
+import lombok.extern.slf4j.Slf4j;
+
+import javax.inject.Inject;
+import java.util.Optional;
+
+@Singleton
+@Slf4j
+public class UserServiceImpl implements UserService {
+
+    private final UsersDB usersDB;
+    private final UserCache userCache;
+
+    @Inject
+    public UserServiceImpl(UsersDB usersDB, UserCache userCache) {
+        this.usersDB = usersDB;
+        this.userCache = userCache;
+    }
+
+    public User getUserByEmail(String email, boolean allowInactive) throws Exception {
+        Optional<StoredUser> optionalStoredUser = usersDB.getUserByEmail(email, true);
+        if(!optionalStoredUser.isPresent()) {
+            throw new UserException(ErrorCode.USER_ID_NOT_FOUND, "User not Found");
+        }
+        return UserUtils.toDto(optionalStoredUser.get());
+    }
+
+    @Override
+    public User getUser(String email, String password, boolean allowInactive) throws Exception {
+        Optional<User> optionalStoredUser = userCache.get(email);
+        if(optionalStoredUser.isPresent()) {
+            log.info("Fetched from Cache");
+            return optionalStoredUser.get();
+        }
+        Optional<StoredUser> optionalBase = usersDB.get(email, password, allowInactive);
+        if(!optionalBase.isPresent()) {
+            throw new UserException(ErrorCode.USER_ID_NOT_FOUND, "User not Found");
+        }
+        User user = UserUtils.toDto(optionalBase.get());
+        userCache.put(user);
+        log.info("Fetched from DB");
+        return user;
+    }
+
+    @Override
+    public User createUser(UserCreateRequest request) throws Exception {
+        Optional<StoredUser> existingUser = usersDB.getUserByEmail(request.getEmail(), true);
+        if(existingUser.isPresent()){
+            throw new UserException(ErrorCode.USER_ALREADY_EXIST, "User Already Exists");
+        }
+        Optional<StoredUser> optionalStoredBase = usersDB.save(UserUtils.toDao(request));
+        if(!optionalStoredBase.isPresent()){
+            throw new UserException(ErrorCode.USER_NOT_SAVED, "User not saved");
+        }
+        return UserUtils.toDto(optionalStoredBase.get());
+    }
+}
